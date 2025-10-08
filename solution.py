@@ -6,6 +6,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
+
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
 EXTENDED_EVALUATION = False
 EVALUATION_GRID_POINTS = 300  # Number of grid points used in extended evaluation
@@ -31,6 +32,41 @@ class Model(object):
 
         # TODO: Add custom initialization for your model here if necessary
 
+        # GP and preprocessing placeholders
+        self.gp: typing.Optional[GaussianProcessRegressor] = None
+        self.x_min = None
+        self.x_max = None
+
+        # Decision-rule parameter (how much to shift up in residential areas)
+        # We tune this on a small validation split.
+        self.alpha_shift: float = 0.0
+
+    # -----------------------
+    # Utilities
+    # -----------------------
+    def _minmax_fit(self, X: np.ndarray):
+        self.x_min = X.min(axis=0)
+        self.x_max = X.max(axis=0)
+
+        # Avoid division by zero
+        span = self.x_max - self.x_min
+        span[span == 0.0] = 1.0
+        self._span = span
+
+    def _minmax_transform(self, X: np.ndarray) -> np.ndarray:
+        return (X - self.x_min) / self._span
+
+    def _decision_rule(self, mean: np.ndarray, std: np.ndarray, area_flags: np.ndarray) -> np.ndarray:
+        """
+        Apply asymmetric-cost-aware post-processing:
+        In candidate residential areas (area_flags==True), predict mean + alpha * std.
+        Elsewhere use the posterior mean.
+        """
+        preds = mean.copy()
+        if np.any(area_flags):
+            preds[area_flags.astype(bool)] = mean[area_flags.astype(bool)] + self.alpha_shift * std[area_flags.astype(bool)]
+        return preds
+
     # Don't change the name or the signature of this function
     def predict_pollution_concentration(self, test_coordinates: np.ndarray, test_area_flags: np.ndarray) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -43,11 +79,19 @@ class Model(object):
         """
 
         # TODO: Use your GP to estimate the posterior mean and stddev for each city_area here
-        gp_mean = np.zeros(test_coordinates.shape[0], dtype=float)
-        gp_std = np.zeros(test_coordinates.shape[0], dtype=float)
+        #gp_mean = np.zeros(test_coordinates.shape[0], dtype=float)
+        #gp_std = np.zeros(test_coordinates.shape[0], dtype=float)
+
+        assert self.gp is not None, "Model must be fitted before prediction."
+
+        X = self._minmax_transform(test_coordinates)
+        gp_mean, gp_std = self.gp.predict(X, return_std=True)
+        gp_mean = gp_mean.astype(float)
+        gp_std = gp_std.astype(float)
 
         # TODO: Use the GP posterior to form your predictions here
-        predictions = gp_mean
+        #predictions = gp_mean
+        predictions = self._decision_rule(gp_mean, gp_std, test_area_flags)
 
         return predictions, gp_mean, gp_std
 
@@ -61,7 +105,54 @@ class Model(object):
         """
 
         # TODO: Fit your model here
-        pass
+        # ---- Preprocess (min-max scaling for stable kernel length-scales) ----
+        self._minmax_fit(train_coordinates)
+        X_all = self._minmax_transform(train_coordinates)
+        y_all = train_targets.astype(float)
+
+        # ---- Small validation split for alpha tuning (asymmetric cost) ----
+        n = X_all.shape[0]
+        idx = np.arange(n)
+        self.rng.shuffle(idx)
+        # 80/20 split
+        split = int(0.8 * n)
+        tr_idx, val_idx = idx[:split], idx[split:]
+
+        X_tr, y_tr, a_tr = X_all[tr_idx], y_all[tr_idx], train_area_flags[tr_idx].astype(bool)
+        X_val, y_val, a_val = X_all[val_idx], y_all[val_idx], train_area_flags[val_idx].astype(bool)
+
+        # ---- Kernel & GP ----
+        # Anisotropic RBF + WhiteKernel; constant term helps scaling
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(length_scale=[0.2, 0.2], length_scale_bounds=(1e-2, 1e2)) \
+                 + WhiteKernel(noise_level=1.0, noise_level_bounds=(1e-6, 1e2))
+
+        gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, n_restarts_optimizer=3, random_state=0)
+        gp.fit(X_tr, y_tr)
+
+        # ---- Tune alpha_shift to reduce asymmetric cost on validation ----
+        candidate_alphas = np.array([0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0])
+        best_alpha = 0.0
+        best_cost = np.inf
+
+        # We'll reuse the global calculate_cost from this file.
+        for alpha in candidate_alphas:
+            m_val, s_val = gp.predict(X_val, return_std=True)
+            preds_val = m_val.copy()
+            preds_val[a_val] = m_val[a_val] + alpha * s_val[a_val]
+            cost = calculate_cost(y_val, preds_val, a_val.astype(bool))
+            if cost < best_cost:
+                best_cost = cost
+                best_alpha = float(alpha)
+
+        # ---- Refit GP on all data for final model ----
+        gp_final = GaussianProcessRegressor(kernel=kernel, normalize_y=True, n_restarts_optimizer=5, random_state=0)
+        gp_final.fit(X_all, y_all)
+
+        self.gp = gp_final
+        self.alpha_shift = best_alpha
+        # Optional: print chosen alpha and kernel for transparency
+        print(f"[Model] Chosen alpha_shift={self.alpha_shift:.3f}")
+        print(f"[Model] Learned kernel: {self.gp.kernel_}")
 
 # You don't have to change this function
 def calculate_cost(ground_truth: np.ndarray, predictions: np.ndarray, area_flags: np.ndarray) -> float:
@@ -180,6 +271,13 @@ def get_city_area_data(train_x: np.ndarray, test_x: np.ndarray) -> typing.Tuple[
     test_area_flags = np.zeros((test_x.shape[0],), dtype=bool)
 
     #TODO: Extract the city_area information from the training and test features
+    # Fill the preallocated arrays from the raw matrices
+    train_coordinates[:, :] = train_x[:, :2].astype(float)
+    train_area_flags[:]     = (train_x[:, 2] != 0)  # bool
+
+    test_coordinates[:, :]  = test_x[:, :2].astype(float)
+    test_area_flags[:]      = (test_x[:, 2] != 0)   # bool
+
 
     assert train_coordinates.shape[0] == train_area_flags.shape[0] and test_coordinates.shape[0] == test_area_flags.shape[0]
     assert train_coordinates.shape[1] == 2 and test_coordinates.shape[1] == 2
