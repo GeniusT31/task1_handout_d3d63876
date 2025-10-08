@@ -49,6 +49,7 @@ class Model(object):
 
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean
+        #useless update for branching
 
         return predictions, gp_mean, gp_std
 
