@@ -49,7 +49,21 @@ class Model(object):
 
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean
-        #useless update for branching
+
+        print("Testing begun")
+        for idx, in_res in enumerate(test_area_flags):
+            if in_res:
+                gp_mean[idx], gp_std[idx] = self.gaussian_process_0.predict(test_coordinates[idx].reshape(1,2), return_std=True)
+            else:
+                gp_mean[idx], gp_std[idx] = self.gaussian_process_1.predict(test_coordinates[idx].reshape(1,2), return_std=True)
+        
+        for idx, in_res in enumerate(test_area_flags):
+            if in_res:
+                gp_mean[idx] += gp_std[idx]
+
+
+        return gp_mean, gp_mean, gp_std
+
 
         return predictions, gp_mean, gp_std
 
@@ -63,7 +77,29 @@ class Model(object):
         """
 
         # TODO: Fit your model here
-        pass
+
+        print("Training begun")
+        #split data into in city or not
+        in_res_idx = []
+        out_res_idx = []
+        for idx, in_res in enumerate(train_area_flags):
+            if in_res:
+                in_res_idx.append(idx)
+            else:
+                out_res_idx.append(idx)
+            
+        kernel = 1.0 * RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e3)) \
+         + WhiteKernel(noise_level=0.2**2, noise_level_bounds=(1e-3, 1e2))
+
+        self.gaussian_process_0 = GaussianProcessRegressor(kernel=kernel)
+
+        self.gaussian_process_1 = GaussianProcessRegressor(kernel=kernel)
+
+        self.gaussian_process_0.fit(train_coordinates[in_res_idx], train_targets[in_res_idx])
+
+        self.gaussian_process_1.fit(train_coordinates[out_res_idx], train_targets[out_res_idx])
+
+        print("training completed")
 
 # You don't have to change this function
 def calculate_cost(ground_truth: np.ndarray, predictions: np.ndarray, area_flags: np.ndarray) -> float:
