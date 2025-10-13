@@ -51,6 +51,7 @@ class Model(object):
         gp_mean, gp_std = self.gp.predict(test_coordinates, return_std=True)
 
         # TODO: Use the GP posterior to form your predictions here
+        
         predictions = gp_mean.copy()
         test_area_flags = test_area_flags.astype(bool)
         par = 1
@@ -82,7 +83,7 @@ class Model(object):
         # GP model
         self.gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, normalize_y=True, random_state=0)
 
-        # model fitting
+        # model training
         self.gp.fit(train_coordinates, train_targets)
 
 # You don't have to change this function
