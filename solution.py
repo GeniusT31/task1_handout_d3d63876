@@ -1,5 +1,3 @@
-# Commit 1
-
 import os
 import typing
 from sklearn.gaussian_process.kernels import *
@@ -31,6 +29,7 @@ class Model(object):
         We already provide a random number generator for reproducibility.
         """
         self.rng = np.random.default_rng(seed=0)
+        self.gp = None
 
         # TODO: Add custom initialization for your model here if necessary
 
@@ -46,11 +45,14 @@ class Model(object):
         """
 
         # TODO: Use your GP to estimate the posterior mean and stddev for each city_area here
-        gp_mean = np.zeros(test_coordinates.shape[0], dtype=float)
-        gp_std = np.zeros(test_coordinates.shape[0], dtype=float)
+        # gp_mean = np.zeros(test_coordinates.shape[0], dtype=float)
+        # gp_std = np.zeros(test_coordinates.shape[0], dtype=float)
+
+        gp_mean, gp_std = self.gp.predict(test_coordinates, return_std=True)
 
         # TODO: Use the GP posterior to form your predictions here
-        predictions = gp_mean
+        predictions = gp_mean.copy()
+        predictions[test_area_flags] = gp_mean[test_area_flags] + gp_std[test_area_flags]
 
         return predictions, gp_mean, gp_std
 
@@ -64,7 +66,22 @@ class Model(object):
         """
 
         # TODO: Fit your model here
-        pass
+
+        n_train = train_coordinates.shape[0]
+        # sub-sampling if too many
+        if n_train > 1000: 
+            idx = self.rng.choice(n_train, size=2000, replace=False)
+            train_coordinates = train_coordinates[idx]
+            train_targets = train_targets[idx]
+
+        # kernel definition
+        kernel = RBF(length_scale=0.1, length_scale_bounds=(1e-2, 1e2)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
+
+        # GP model
+        self.gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5, normalize_y=True, random_state=0)
+
+        # model fitting
+        self.gp.fit(train_coordinates, train_targets)
 
 # You don't have to change this function
 def calculate_cost(ground_truth: np.ndarray, predictions: np.ndarray, area_flags: np.ndarray) -> float:
@@ -177,12 +194,17 @@ def get_city_area_data(train_x: np.ndarray, test_x: np.ndarray) -> typing.Tuple[
     :return: Tuple of (training features' 2D coordinates, training features' city_area information,
         test features' 2D coordinates, test features' city_area information)
     """
-    train_coordinates = np.zeros((train_x.shape[0], 2), dtype=float)
-    train_area_flags = np.zeros((train_x.shape[0],), dtype=bool)
-    test_coordinates = np.zeros((test_x.shape[0], 2), dtype=float)
-    test_area_flags = np.zeros((test_x.shape[0],), dtype=bool)
+    # train_coordinates = np.zeros((train_x.shape[0], 2), dtype=float)
+    # train_area_flags = np.zeros((train_x.shape[0],), dtype=bool)
+    # test_coordinates = np.zeros((test_x.shape[0], 2), dtype=float)
+    # test_area_flags = np.zeros((test_x.shape[0],), dtype=bool)
 
     #TODO: Extract the city_area information from the training and test features
+    train_coordinates = train_x[:, :2].astype(float)
+    test_coordinates = test_x[:, :2].astype(float)
+
+    train_area_flags = train_x[:, 2].astype(bool)
+    test_area_flags = test_x[:, 2].astype(bool)
 
     assert train_coordinates.shape[0] == train_area_flags.shape[0] and test_coordinates.shape[0] == test_area_flags.shape[0]
     assert train_coordinates.shape[1] == 2 and test_coordinates.shape[1] == 2
