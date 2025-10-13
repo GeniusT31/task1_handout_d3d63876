@@ -8,7 +8,7 @@ from matplotlib import cm
 
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
-EXTENDED_EVALUATION = False
+EXTENDED_EVALUATION = True
 EVALUATION_GRID_POINTS = 300  # Number of grid points used in extended evaluation
 
 # Cost function constants
@@ -52,7 +52,9 @@ class Model(object):
 
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean.copy()
-        predictions[test_area_flags] = gp_mean[test_area_flags] + gp_std[test_area_flags]
+        test_area_flags = test_area_flags.astype(bool)
+        par = 1
+        predictions[test_area_flags] = gp_mean[test_area_flags] + par * gp_std[test_area_flags]
 
         return predictions, gp_mean, gp_std
 
@@ -68,17 +70,17 @@ class Model(object):
         # TODO: Fit your model here
 
         n_train = train_coordinates.shape[0]
-        # sub-sampling if too many
-        if n_train > 1000: 
-            idx = self.rng.choice(n_train, size=2000, replace=False)
+        # sub-sampling
+        if n_train > 3500: 
+            idx = self.rng.choice(n_train, size=3500, replace=False)
             train_coordinates = train_coordinates[idx]
             train_targets = train_targets[idx]
 
         # kernel definition
-        kernel = RBF(length_scale=0.1, length_scale_bounds=(1e-2, 1e2)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
+        kernel = RBF(length_scale=1.0, length_scale_bounds=(1e-2, 1e2)) + WhiteKernel(noise_level=0.02, noise_level_bounds=(1e-5, 1e1))
 
         # GP model
-        self.gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5, normalize_y=True, random_state=0)
+        self.gp = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, normalize_y=True, random_state=0)
 
         # model fitting
         self.gp.fit(train_coordinates, train_targets)
