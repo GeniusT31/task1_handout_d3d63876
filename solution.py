@@ -73,7 +73,7 @@ class Model(object):
 
         # TODO: Fit your model here
 
-        kernel = RBF(1.0, (1e-2, 1e3))
+        kernel = RBF(1.0, (1e-2, 1e3)) + WhiteKernel(noise_level=0.2**2, noise_level_bounds=(1e-3, 1e2))
         self.gpr = GaussianProcessRegressor(
             kernel=kernel,
             optimizer='fmin_l_bfgs_b',     # default optimizer
