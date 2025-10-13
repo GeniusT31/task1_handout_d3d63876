@@ -52,6 +52,8 @@ class Model(object):
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean
 
+        print("Predicting with GP")
+
         # Get mean & std on validation
         gp_mean, gp_std = self.gpr.predict(test_coordinates, return_std=True)
 
@@ -73,14 +75,22 @@ class Model(object):
 
         # TODO: Fit your model here
 
+        n_all = train_coordinates.shape[0]
+        max_hp = 500  # how many points to use to learn kernel + tune alpha
+
+        if n_all > max_hp:
+            hp_idx = self.rng.choice(n_all, size=max_hp, replace=False)
+        else:
+            hp_idx = np.arange(n_all)
+
+        X_hp, y_hp, a_hp = train_coordinates[hp_idx], train_targets[hp_idx], train_area_flags[hp_idx]
+
+        print("Fitting GP")
+
         kernel = RBF(1.0, (1e-2, 1e3)) + WhiteKernel(noise_level=0.2**2, noise_level_bounds=(1e-3, 1e2))
-        self.gpr = GaussianProcessRegressor(
-            kernel=kernel,
-            optimizer='fmin_l_bfgs_b',     # default optimizer
-            n_restarts_optimizer=10,       # try multiple random starts
-            normalize_y=True
-        )
-        self.gpr.fit(train_targets, train_coordinates)                       # optimizes hyperparams here
+        self.gpr = GaussianProcessRegressor(kernel=kernel)
+
+        self.gpr.fit(y_hp, X_hp)                       
 
 
         #print(gpr.kernel_)                  # optimized kernel
