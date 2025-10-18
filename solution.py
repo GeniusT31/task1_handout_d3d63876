@@ -76,24 +76,28 @@ class Model(object):
         # TODO: Fit your model here
 
         n_all = train_coordinates.shape[0]
-        max_hp = 500  # how many points to use to learn kernel + tune alpha
+        max_hp = 2000  # how many points to use to learn kernel + tune alpha
 
         if n_all > max_hp:
             hp_idx = self.rng.choice(n_all, size=max_hp, replace=False)
         else:
             hp_idx = np.arange(n_all)
 
-        X_hp, y_hp, a_hp = train_coordinates[hp_idx], train_targets[hp_idx], train_area_flags[hp_idx]
+        X_hp = train_coordinates[hp_idx,:]
+        y_hp = train_targets[hp_idx]
+        a_hp = train_area_flags[hp_idx]
 
         print("Fitting GP")
 
         kernel = RBF(1.0, (1e-2, 1e3)) + WhiteKernel(noise_level=0.2**2, noise_level_bounds=(1e-3, 1e2))
         self.gpr = GaussianProcessRegressor(kernel=kernel)
 
-        self.gpr.fit(y_hp, X_hp)                       
+        self.gpr.fit(X_hp, y_hp)                       
+        print("Fitting GP finished")
 
 
         #print(gpr.kernel_)                  # optimized kernel
+
         ##print(gpr.log_marginal_likelihood(gpr.kernel_.theta))
 
 # You don't have to change this function
